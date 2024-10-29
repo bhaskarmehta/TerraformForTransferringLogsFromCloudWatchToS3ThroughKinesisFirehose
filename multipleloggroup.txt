@@ -1,0 +1,150 @@
+provider "aws" {
+  region = "ap-south-1"
+}
+
+# List of CloudWatch Log Groups
+variable "log_group_names" {
+  type    = list(string)
+  default = [
+    "/aws/lambda/lambda_trigger_1",
+    "/aws/lambda/lambda_trigger_2",
+    "/aws/lambda/lambda_trigger_3",
+    "/aws/lambda/lambda_trigger_4",
+    "/aws/lambda/lambda_trigger_5"
+  ]
+}
+
+# S3 bucket to store logs
+resource "aws_s3_bucket" "logs_bucket" {
+  bucket = "cloudwatch-logs-to-s3-bucket" # Change to your desired bucket name
+}
+
+# IAM Role for Kinesis Firehose
+resource "aws_iam_role" "firehose_role" {
+  name = "firehose_delivery_role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = "firehose.amazonaws.com"
+        }
+        Action = "sts:AssumeRole"
+      }
+    ]
+  })
+}
+
+# Firehose policy
+resource "aws_iam_policy" "firehose_policy" {
+  name   = "firehose_delivery_policy"
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = [
+          "s3:PutObject",
+          "s3:PutObjectAcl"
+        ]
+        Resource = "${aws_s3_bucket.logs_bucket.arn}/*"
+      },
+      {
+        Effect   = "Allow"
+        Action   = [
+          "kinesis:GetRecords",
+          "kinesis:GetShardIterator",
+          "kinesis:DescribeStream",
+          "kinesis:ListStreams",
+          "kinesis:PutRecord",
+          "kinesis:PutRecords"
+        ]
+        Resource = aws_kinesis_stream.cloudwatch_kinesis_stream.arn
+      }
+    ]
+  })
+}
+
+# Attach the policy to the Firehose role
+resource "aws_iam_role_policy_attachment" "firehose_policy_attachment" {
+  role       = aws_iam_role.firehose_role.name
+  policy_arn = aws_iam_policy.firehose_policy.arn
+}
+
+# IAM Role for CloudWatch Logs
+resource "aws_iam_role" "cloudwatch_role" {
+  name = "cloudwatch_logs_to_kinesis_role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = "logs.ap-south-1.amazonaws.com" # Make sure this matches your region
+        }
+        Action = "sts:AssumeRole"
+      }
+    ]
+  })
+}
+
+# IAM Policy for CloudWatch Logs Role
+resource "aws_iam_policy" "cloudwatch_policy" {
+  name   = "cloudwatch_logs_policy"
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = [
+          "kinesis:PutRecord",
+          "kinesis:PutRecords"
+        ]
+        Resource = aws_kinesis_stream.cloudwatch_kinesis_stream.arn
+      }
+    ]
+  })
+}
+
+# Attach the policy to the CloudWatch role
+resource "aws_iam_role_policy_attachment" "cloudwatch_policy_attachment" {
+  role       = aws_iam_role.cloudwatch_role.name
+  policy_arn = aws_iam_policy.cloudwatch_policy.arn
+}
+
+# Kinesis Data Stream
+resource "aws_kinesis_stream" "cloudwatch_kinesis_stream" {
+  name             = "cloudwatch-kinesis-stream"
+  shard_count      = 1
+  retention_period = 24
+}
+
+# Kinesis Firehose Delivery Stream
+resource "aws_kinesis_firehose_delivery_stream" "cloudwatch_to_s3" {
+  name        = "cloudwatch-to-s3-firehose"
+  destination = "extended_s3"
+
+  extended_s3_configuration {
+    role_arn           = aws_iam_role.firehose_role.arn
+    bucket_arn         = aws_s3_bucket.logs_bucket.arn
+    compression_format = "GZIP"
+  }
+
+  kinesis_source_configuration {
+    kinesis_stream_arn = aws_kinesis_stream.cloudwatch_kinesis_stream.arn
+    role_arn           = aws_iam_role.firehose_role.arn
+  }
+}
+
+# CloudWatch Log Subscription Filters for each log group
+resource "aws_cloudwatch_log_subscription_filter" "kinesis_subscription" {
+  for_each        = toset(var.log_group_names)
+  name            = "kinesis-subscription-${each.key}"
+  log_group_name  = each.value
+  filter_pattern  = ""
+  destination_arn = aws_kinesis_stream.cloudwatch_kinesis_stream.arn
+  role_arn        = aws_iam_role.cloudwatch_role.arn
+}
