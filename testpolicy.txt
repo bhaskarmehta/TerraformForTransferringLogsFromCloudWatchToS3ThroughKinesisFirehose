@@ -1,0 +1,16 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "AWS": "arn:aws:iam::<original_account_id>:role/firehose_delivery_role" // Replace with the Firehose role ARN in the original account
+      },
+      "Action": [
+        "s3:PutObject",
+        "s3:PutObjectAcl"
+      ],
+      "Resource": "arn:aws:s3:::destination-account-logs-bucket/*" // Replace with the new account S3 bucket ARN
+    }
+  ]
+}
