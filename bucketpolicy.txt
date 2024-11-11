@@ -15,3 +15,23 @@
     }
   ]
 }
+
+--------------
+{
+      "Effect": "Allow",
+      "Action": [
+        "s3:ListBucket",
+        "s3:GetObject",
+        "s3:PutObject"
+      ],
+      "Resource": [
+        "arn:aws:s3:::mybucket",
+        "arn:aws:s3:::mybucket/*"
+      ],
+      "Principal": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:PrincipalArn": "arn:aws:iam::your-aws-account-id:role/GitLabS3AccessRole"
+        }
+      }
+    }
